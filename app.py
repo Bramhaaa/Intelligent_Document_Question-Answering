@@ -84,45 +84,40 @@ if len(st.session_state.documents) == 0:
     st.markdown("##### Upload PDF documents to start chatting")
     uploaded_files = st.file_uploader("Choose PDF files", type="pdf", accept_multiple_files=True)
 else:
-    # Show document manager
-    with st.expander(f"📚 Loaded Documents ({len(st.session_state.documents)})", expanded=False):
-        for doc_name in list(st.session_state.documents.keys()):
-            col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
-            with col1:
-                st.text(doc_name)
-            with col2:
-                st.text(f"{st.session_state.documents[doc_name]['pages']} pages")
-            with col3:
-                if st.button("📊", key=f"insight_{doc_name}", help="View insights"):
-                    st.session_state.show_insights = doc_name
-                    st.rerun()
-            with col4:
-                if st.button("🗑️", key=f"del_{doc_name}"):
-                    del st.session_state.documents[doc_name]
-                    st.rerun()
+    # Document selector for insights
+    st.markdown("##### 📚 Your Documents")
+    doc_names = list(st.session_state.documents.keys())
+    selected_doc = st.selectbox(
+        "Select a document to view insights",
+        doc_names,
+        key="doc_selector",
+        label_visibility="collapsed"
+    )
+    
+    # Quick actions
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("➕ Add More", use_container_width=True):
+            st.session_state.show_uploader = True
+            st.rerun()
+    with col2:
+        if st.button("🗑️ Remove", use_container_width=True):
+            if selected_doc:
+                del st.session_state.documents[selected_doc]
+                st.rerun()
+    with col3:
+        if st.button("Clear All", use_container_width=True):
+            st.session_state.documents = {}
+            if 'chat_history' in st.session_state:
+                del st.session_state.chat_history
+            st.rerun()
+    
+    
+    # Document Insights - Always visible for selected document
+    if selected_doc and selected_doc in st.session_state.documents:
+        doc_info = st.session_state.documents[selected_doc]
         
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("➕ Add More Documents", use_container_width=True):
-                st.session_state.show_uploader = True
-                st.rerun()
-        with col2:
-            if st.button("Clear All", use_container_width=True):
-                st.session_state.documents = {}
-                if 'chat_history' in st.session_state:
-                    del st.session_state.chat_history
-                st.rerun()
-    
-    st.divider()
-    
-    # Show document insights if requested
-    if st.session_state.get('show_insights'):
-        doc_name = st.session_state.show_insights
-        if doc_name in st.session_state.documents:
-            doc_info = st.session_state.documents[doc_name]
-            
-            st.subheader(f"📊 Document Insights: {doc_name}")
-            
+        with st.expander(f"📊 Insights: {selected_doc}", expanded=True):
             # Statistics
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -135,65 +130,66 @@ else:
                 avg_words = doc_info['word_count'] // doc_info['pages'] if doc_info['pages'] > 0 else 0
                 st.metric("Avg Words/Page", avg_words)
             
-            # Generate summary
-            if st.button("Generate AI Summary", use_container_width=True):
-                with st.spinner("Generating summary..."):
-                    llm = ChatGoogleGenerativeAI(
-                        model="gemini-2.0-flash",
-                        google_api_key=os.getenv("GOOGLE_API_KEY"),
-                        temperature=0.3
-                    )
-                    
-                    summary_prompt = f"""Provide a concise summary of this document in 3-4 sentences. Focus on the main topics and key points.
+            st.markdown("---")
+            
+            # AI Insights
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("📝 Generate Summary", use_container_width=True, key="gen_summary"):
+                    with st.spinner("Generating summary..."):
+                        llm = ChatGoogleGenerativeAI(
+                            model="gemini-2.0-flash",
+                            google_api_key=os.getenv("GOOGLE_API_KEY"),
+                            temperature=0.3
+                        )
+                        
+                        summary_prompt = f"""Provide a concise summary of this document in 3-4 sentences. Focus on the main topics and key points.
 
 Document excerpt:
 {doc_info['full_text']}
 
 Summary:"""
-                    
-                    summary = llm.invoke(summary_prompt)
-                    st.session_state.documents[doc_name]['summary'] = summary.content
+                        
+                        summary = llm.invoke(summary_prompt)
+                        st.session_state.documents[selected_doc]['summary'] = summary.content
+                        st.rerun()
             
-            # Display summary if available
-            if 'summary' in doc_info:
-                st.markdown("**Summary:**")
-                st.info(doc_info['summary'])
-            
-            # Key topics extraction
-            if st.button("Extract Key Topics", use_container_width=True):
-                with st.spinner("Extracting topics..."):
-                    llm = ChatGoogleGenerativeAI(
-                        model="gemini-2.0-flash",
-                        google_api_key=os.getenv("GOOGLE_API_KEY"),
-                        temperature=0.3
-                    )
-                    
-                    topics_prompt = f"""Extract 5-7 key topics or themes from this document. List them as bullet points.
+            with col2:
+                if st.button("🔑 Extract Topics", use_container_width=True, key="gen_topics"):
+                    with st.spinner("Extracting topics..."):
+                        llm = ChatGoogleGenerativeAI(
+                            model="gemini-2.0-flash",
+                            google_api_key=os.getenv("GOOGLE_API_KEY"),
+                            temperature=0.3
+                        )
+                        
+                        topics_prompt = f"""Extract 5-7 key topics or themes from this document. List them as bullet points.
 
 Document excerpt:
 {doc_info['full_text']}
 
 Key Topics:"""
-                    
-                    topics = llm.invoke(topics_prompt)
-                    st.session_state.documents[doc_name]['topics'] = topics.content
+                        
+                        topics = llm.invoke(topics_prompt)
+                        st.session_state.documents[selected_doc]['topics'] = topics.content
+                        st.rerun()
             
-            # Display topics if available
+            # Display insights if available
+            if 'summary' in doc_info:
+                st.markdown("**Summary:**")
+                st.info(doc_info['summary'])
+            
             if 'topics' in doc_info:
                 st.markdown("**Key Topics:**")
                 st.markdown(doc_info['topics'])
-            
-            if st.button("Close Insights"):
-                del st.session_state.show_insights
-                st.rerun()
-            
-            st.divider()
+    
+    st.divider()
     
     # Show uploader if requested
     if st.session_state.get('show_uploader', False):
-        uploaded_files = st.file_uploader("Add more PDF files", type="pdf", accept_multiple_files=True)
-        if uploaded_files:
-            st.session_state.show_uploader = False
+        uploaded_files = st.file_uploader("Add more PDF files", type="pdf", accept_multiple_files=True, key="additional_files")
+        if not uploaded_files:
+            uploaded_files = None
     else:
         uploaded_files = None
 
@@ -253,6 +249,9 @@ if uploaded_files:
             finally:
                 os.remove(temp_file_path)
     
+    # Reset uploader flag and rerun
+    if 'show_uploader' in st.session_state:
+        del st.session_state.show_uploader
     st.rerun()
 
 # Chat Interface
