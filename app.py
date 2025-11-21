@@ -87,12 +87,16 @@ else:
     # Show document manager
     with st.expander(f"📚 Loaded Documents ({len(st.session_state.documents)})", expanded=False):
         for doc_name in list(st.session_state.documents.keys()):
-            col1, col2, col3 = st.columns([3, 1, 1])
+            col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
             with col1:
                 st.text(doc_name)
             with col2:
                 st.text(f"{st.session_state.documents[doc_name]['pages']} pages")
             with col3:
+                if st.button("📊", key=f"insight_{doc_name}", help="View insights"):
+                    st.session_state.show_insights = doc_name
+                    st.rerun()
+            with col4:
                 if st.button("🗑️", key=f"del_{doc_name}"):
                     del st.session_state.documents[doc_name]
                     st.rerun()
@@ -110,6 +114,80 @@ else:
                 st.rerun()
     
     st.divider()
+    
+    # Show document insights if requested
+    if st.session_state.get('show_insights'):
+        doc_name = st.session_state.show_insights
+        if doc_name in st.session_state.documents:
+            doc_info = st.session_state.documents[doc_name]
+            
+            st.subheader(f"📊 Document Insights: {doc_name}")
+            
+            # Statistics
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Pages", doc_info['pages'])
+            with col2:
+                st.metric("Words", f"{doc_info['word_count']:,}")
+            with col3:
+                st.metric("Characters", f"{doc_info['char_count']:,}")
+            with col4:
+                avg_words = doc_info['word_count'] // doc_info['pages'] if doc_info['pages'] > 0 else 0
+                st.metric("Avg Words/Page", avg_words)
+            
+            # Generate summary
+            if st.button("Generate AI Summary", use_container_width=True):
+                with st.spinner("Generating summary..."):
+                    llm = ChatGoogleGenerativeAI(
+                        model="gemini-2.0-flash",
+                        google_api_key=os.getenv("GOOGLE_API_KEY"),
+                        temperature=0.3
+                    )
+                    
+                    summary_prompt = f"""Provide a concise summary of this document in 3-4 sentences. Focus on the main topics and key points.
+
+Document excerpt:
+{doc_info['full_text']}
+
+Summary:"""
+                    
+                    summary = llm.invoke(summary_prompt)
+                    st.session_state.documents[doc_name]['summary'] = summary.content
+            
+            # Display summary if available
+            if 'summary' in doc_info:
+                st.markdown("**Summary:**")
+                st.info(doc_info['summary'])
+            
+            # Key topics extraction
+            if st.button("Extract Key Topics", use_container_width=True):
+                with st.spinner("Extracting topics..."):
+                    llm = ChatGoogleGenerativeAI(
+                        model="gemini-2.0-flash",
+                        google_api_key=os.getenv("GOOGLE_API_KEY"),
+                        temperature=0.3
+                    )
+                    
+                    topics_prompt = f"""Extract 5-7 key topics or themes from this document. List them as bullet points.
+
+Document excerpt:
+{doc_info['full_text']}
+
+Key Topics:"""
+                    
+                    topics = llm.invoke(topics_prompt)
+                    st.session_state.documents[doc_name]['topics'] = topics.content
+            
+            # Display topics if available
+            if 'topics' in doc_info:
+                st.markdown("**Key Topics:**")
+                st.markdown(doc_info['topics'])
+            
+            if st.button("Close Insights"):
+                del st.session_state.show_insights
+                st.rerun()
+            
+            st.divider()
     
     # Show uploader if requested
     if st.session_state.get('show_uploader', False):
@@ -152,11 +230,19 @@ if uploaded_files:
 
                 vector_store = FAISS.from_documents(splits, embeddings)
                 
-                # Store document info
+                # Calculate document statistics
+                full_text = " ".join([doc.page_content for doc in docs])
+                word_count = len(full_text.split())
+                char_count = len(full_text)
+                
+                # Store document info with stats
                 st.session_state.documents[uploaded_file.name] = {
                     'vector_store': vector_store,
                     'pages': len(docs),
-                    'chunks': len(splits)
+                    'chunks': len(splits),
+                    'word_count': word_count,
+                    'char_count': char_count,
+                    'full_text': full_text[:5000]  # Store first 5000 chars for summary
                 }
                 
                 st.success(f"✓ {uploaded_file.name} loaded ({len(docs)} pages)")
