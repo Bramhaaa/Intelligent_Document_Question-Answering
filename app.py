@@ -105,9 +105,12 @@ if uploaded_files:
                 loader = PyPDFLoader(temp_file_path)
                 docs = loader.load()
                 
-                # Add document name to metadata
-                for doc in docs:
+                # Preserve page numbers and add document name to metadata
+                for i, doc in enumerate(docs):
                     doc.metadata['source_document'] = uploaded_file.name
+                    # PyPDFLoader already includes 'page' in metadata, ensure it's there
+                    if 'page' not in doc.metadata:
+                        doc.metadata['page'] = i
 
                 text_splitter = RecursiveCharacterTextSplitter(
                     chunk_size=1000, 
@@ -144,9 +147,27 @@ if len(st.session_state.documents) > 0:
     for message in st.session_state.chat_history:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
-            # Show source document if available
-            if message.get("source_docs"):
-                st.caption(f"📄 Sources: {', '.join(set(message['source_docs']))}")
+            # Show citations if available
+            if message.get("citations"):
+                citations = message["citations"]
+                # Show summary of sources
+                summary = {}
+                for cite in citations:
+                    doc_name = cite['document']
+                    if doc_name not in summary:
+                        summary[doc_name] = []
+                    summary[doc_name].append(cite['page'])
+                
+                citation_text = ", ".join([f"{doc} (p. {', '.join(map(str, sorted(set(pages))))})" 
+                                          for doc, pages in summary.items()])
+                st.caption(f"📄 {citation_text}")
+                
+                # Expandable section with full excerpts
+                with st.expander("View citations"):
+                    for i, cite in enumerate(citations, 1):
+                        st.markdown(f"**[{i}] {cite['document']} - Page {cite['page']}**")
+                        st.text(cite['excerpt'][:300] + "..." if len(cite['excerpt']) > 300 else cite['excerpt'])
+                        st.divider()
     
     # Initialize the Gemini Chat Model
     llm = ChatGoogleGenerativeAI(
@@ -176,13 +197,22 @@ if len(st.session_state.documents) > 0:
         # Sort by relevance and take top results
         all_related_docs = all_related_docs[:6]
         
-        # Combine context with source document names
+        # Build citations
+        citations = []
         context_parts = []
-        source_docs = []
-        for doc in all_related_docs:
+        for i, doc in enumerate(all_related_docs, 1):
             source_name = doc.metadata.get('source_document', 'Unknown')
-            source_docs.append(source_name)
-            context_parts.append(f"[From: {source_name}]\n{doc.page_content}")
+            page_num = doc.metadata.get('page', 0) + 1  # Convert to 1-indexed
+            
+            # Store citation info
+            citations.append({
+                'document': source_name,
+                'page': page_num,
+                'excerpt': doc.page_content
+            })
+            
+            # Build context with citation markers
+            context_parts.append(f"[Citation {i} - {source_name}, Page {page_num}]\n{doc.page_content}")
         
         context_text = "\n\n".join(context_parts)
         
@@ -193,7 +223,7 @@ Context:
 
 Question: {user_question}
 
-Provide a clear and concise answer. If information comes from multiple documents, mention which document each piece of information is from."""
+Provide a clear and concise answer. The context includes citation markers showing which document and page each piece of information comes from."""
         
         # Stream the answer
         with st.chat_message("assistant"):
@@ -206,13 +236,28 @@ Provide a clear and concise answer. If information comes from multiple documents
             
             message_placeholder.markdown(full_response)
             
-            # Show source documents
-            unique_sources = list(set(source_docs))
-            st.caption(f"📄 Sources: {', '.join(unique_sources)}")
+            # Show citation summary
+            summary = {}
+            for cite in citations:
+                doc_name = cite['document']
+                if doc_name not in summary:
+                    summary[doc_name] = []
+                summary[doc_name].append(cite['page'])
+            
+            citation_text = ", ".join([f"{doc} (p. {', '.join(map(str, sorted(set(pages))))})" 
+                                      for doc, pages in summary.items()])
+            st.caption(f"📄 {citation_text}")
+            
+            # Expandable citations
+            with st.expander("View citations"):
+                for i, cite in enumerate(citations, 1):
+                    st.markdown(f"**[{i}] {cite['document']} - Page {cite['page']}**")
+                    st.text(cite['excerpt'][:300] + "..." if len(cite['excerpt']) > 300 else cite['excerpt'])
+                    st.divider()
         
         # Add assistant message to history
         st.session_state.chat_history.append({
             "role": "assistant",
             "content": full_response,
-            "source_docs": unique_sources
+            "citations": citations
         })
