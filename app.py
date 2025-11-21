@@ -17,7 +17,7 @@ st.set_page_config(
     page_title="Chat with PDF",
     page_icon="💬",
     layout="centered",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="auto"
 )
 
 # Minimal CSS
@@ -37,8 +37,40 @@ st.markdown("""
     div[data-testid="stFileUploader"] {
         margin-bottom: 2rem;
     }
+    .memory-indicator {
+        background-color: #f0f9ff;
+        border-left: 3px solid #3b82f6;
+        padding: 0.5rem;
+        margin-bottom: 1rem;
+        font-size: 0.85rem;
+        color: #1e40af;
+    }
     </style>
     """, unsafe_allow_html=True)
+
+# Sidebar for conversation controls
+if len(st.session_state.get('documents', {})) > 0:
+    with st.sidebar:
+        st.markdown("### Conversation")
+        
+        chat_count = len(st.session_state.get('chat_history', [])) // 2
+        st.metric("Messages", chat_count)
+        
+        if st.button("🔄 Clear Conversation", use_container_width=True):
+            if 'chat_history' in st.session_state:
+                st.session_state.chat_history = []
+            st.rerun()
+        
+        st.markdown("---")
+        st.markdown("### About")
+        st.markdown("""
+        **Conversation Memory**: The AI remembers your last 3 exchanges for natural follow-up questions.
+        
+        Try:
+        - "Tell me more about that"
+        - "What did you say about X?"
+        - "Can you explain it differently?"
+        """)
 
 # Header
 st.title("Chat with PDF")
@@ -176,6 +208,12 @@ if len(st.session_state.documents) > 0:
         temperature=0.3
     )
 
+    # Show memory indicator if conversation exists
+    if len(st.session_state.chat_history) > 0:
+        exchanges = len(st.session_state.chat_history) // 2
+        st.markdown(f'<div class="memory-indicator">💭 Conversation memory active ({exchanges} exchange{"s" if exchanges != 1 else ""})</div>', 
+                   unsafe_allow_html=True)
+    
     # Chat input
     user_question = st.chat_input("Ask a question about your documents...")
     
@@ -187,7 +225,17 @@ if len(st.session_state.documents) > 0:
         with st.chat_message("user"):
             st.markdown(user_question)
         
-        # Retrieve from all documents
+        # Build conversation context (last 3 exchanges)
+        conversation_context = ""
+        recent_history = st.session_state.chat_history[-7:-1]  # Last 3 Q&A pairs (6 messages)
+        if recent_history:
+            conversation_context = "Previous conversation:\n"
+            for msg in recent_history:
+                role = "User" if msg["role"] == "user" else "Assistant"
+                conversation_context += f"{role}: {msg['content']}\n"
+            conversation_context += "\n"
+        
+        # Retrieve from all documents (use conversation-aware query if needed)
         all_related_docs = []
         for doc_name, doc_info in st.session_state.documents.items():
             retriever = doc_info['vector_store'].as_retriever(search_kwargs={"k": 2})
@@ -216,14 +264,18 @@ if len(st.session_state.documents) > 0:
         
         context_text = "\n\n".join(context_parts)
         
-        prompt = f"""Answer the question based on the provided context from multiple documents.
+        prompt = f"""Answer the question based on the provided context from multiple documents and the conversation history.
 
-Context:
+{conversation_context}Document Context:
 {context_text}
 
-Question: {user_question}
+Current Question: {user_question}
 
-Provide a clear and concise answer. The context includes citation markers showing which document and page each piece of information comes from."""
+Instructions:
+- Provide a clear and concise answer
+- Use the conversation history to understand follow-up questions and references (like "it", "that", "explain more")
+- The context includes citation markers showing which document and page each piece of information comes from
+- If the question refers to previous answers, acknowledge that and build upon it"""
         
         # Stream the answer
         with st.chat_message("assistant"):
