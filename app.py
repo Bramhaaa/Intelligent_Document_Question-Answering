@@ -26,7 +26,13 @@ if not API_KEY:
 st.set_page_config(
     page_title="Learn from PDF",
     page_icon="💬",
-    layout="centered"
+    layout="centered",
+    initial_sidebar_state="collapsed",
+    menu_items={
+        'Get Help': None,
+        'Report a bug': None,
+        'About': None
+    }
 )
 
 st.title("💬 Learn from PDF")
